@@ -20,4 +20,7 @@ normal = { git = "https://github.com/jonathanlb/normal" }
 # normal = { path = "../normal" }
 rocket = "0.5.0-rc.1"
 rocket_contrib = "0.4.10"
+rocket_cors = { git = "https://github.com/lawliet89/rocket_cors", branch = "master" }
+# rocket_cors = "0.5.2"
+rust-crypto = "^0.2"
 structopt = "0.3.17"

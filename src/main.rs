@@ -7,6 +7,8 @@ extern crate rocket_contrib;
 
 use okra::boxchecker::{ActionId, ActivityId, BoxChecker, BoxSearcher};
 use okra::sqlite_boxchecker::SqliteBoxes;
+use rocket::http::Method;
+use rocket_cors::{AllowedHeaders, AllowedOrigins, CorsOptions};
 use std::convert::TryInto;
 
 #[get("/action/get/<max_results>/<last_id>")]
@@ -56,7 +58,20 @@ fn notate_activity(activity_id: ActivityId, notes: &str) -> Option<String> {
 fn rocket() -> _ {
     println!("starting!");
     env_logger::init();
+
+    let allowed_origins = AllowedOrigins::all();
+    let cors = CorsOptions {
+        allowed_origins,
+        allowed_methods: vec![Method::Get].into_iter().map(From::from).collect(),
+        allowed_headers: AllowedHeaders::some(&["Authorization", "Accept"]),
+        allow_credentials: true,
+        ..Default::default()
+    }
+    .to_cors()
+    .unwrap();
+
     rocket::build()
+        .attach(cors)
         .mount("/", routes![get_action_name])
         .mount("/", routes![get_actions])
         .mount("/", routes![log_activity])
