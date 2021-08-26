@@ -174,6 +174,21 @@ impl<'a> BoxSearcher<'a> for SqliteBoxes<'a> {
             }
         }
     }
+
+    fn search_activity_by_time(
+        &self,
+        from: usize,
+        to: usize,
+        dest: &mut Vec<(ActivityId, ActionId)>,
+    ) -> usize {
+        match self.activities.page_left(from as i64, to as i64, dest) {
+            Ok(count) => count,
+            Err(e) => {
+                log::error!("search_activity_by_time: {}", e.msg);
+                0
+            }
+        }
+    }
 }
 
 #[cfg(test)]

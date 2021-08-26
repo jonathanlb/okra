@@ -46,6 +46,13 @@ pub trait BoxSearcher<'a> {
         dest: &mut Vec<(ActionId, String)>,
     ) -> usize;
 
+    fn search_activity_by_time(
+        &self,
+        from: usize,
+        to: usize,
+        dest: &mut Vec<(ActivityId, ActionId)>,
+    ) -> usize;
+
     // activity search criteria
     // - min/max time
     // - action ids

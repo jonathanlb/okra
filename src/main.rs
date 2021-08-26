@@ -11,19 +11,25 @@ use rocket::http::Method;
 use rocket_cors::{AllowedHeaders, AllowedOrigins, CorsOptions};
 use std::convert::TryInto;
 
+// TODO get db name for particular user
+fn get_boxer(file_name: &str) -> SqliteBoxes {
+    SqliteBoxes::new(file_name)
+}
+
 #[get("/action/get/<max_results>/<last_id>")]
 fn get_actions(max_results: usize, last_id: usize) -> String {
     // XXX limit or ossify/remove max_results
     // TODO: add DB and user configuration
-    let boxer = SqliteBoxes::new("test.db");
+    let boxer = get_boxer("test.db");
     let mut dest = vec![(0, "".to_string()); max_results];
-    boxer.search_action_names("%", last_id.try_into().unwrap(), &mut dest);
+    let num_results = boxer.search_action_names("%", last_id.try_into().unwrap(), &mut dest);
+    dest.truncate(num_results);
     json!(dest).to_string()
 }
 
 #[get("/action/get_name/<action_id>")]
 fn get_action_name(action_id: ActionId) -> Option<String> {
-    let boxer = SqliteBoxes::new("test.db");
+    let boxer = get_boxer("test.db");
     let name = boxer.get_action_name(action_id);
     if name == "" {
         None
@@ -32,9 +38,18 @@ fn get_action_name(action_id: ActionId) -> Option<String> {
     }
 }
 
+#[get("/activity/get/<start>/<end>/<max_results>")]
+fn get_activities(start: usize, end: usize, max_results: usize) -> Option<String> {
+    let boxer = get_boxer("test.db");
+    let mut dest = vec![(0, 0); max_results];
+    let num_results = boxer.search_activity_by_time(start, end, &mut dest);
+    dest.truncate(num_results);
+    Some(json!(dest).to_string())
+}
+
 #[get("/activity/log/<action_id>")]
 fn log_activity(action_id: ActionId) -> Option<String> {
-    let mut boxer = SqliteBoxes::new("test.db");
+    let mut boxer = get_boxer("test.db");
     let id = boxer.log_activity(action_id);
     if id != 0 {
         Some(id.to_string()) // Responder<i64> not implemented
@@ -45,7 +60,7 @@ fn log_activity(action_id: ActionId) -> Option<String> {
 
 #[get("/activity/notate/<activity_id>/<notes>")]
 fn notate_activity(activity_id: ActivityId, notes: &str) -> Option<String> {
-    let mut boxer = SqliteBoxes::new("test.db");
+    let mut boxer = get_boxer("test.db");
     let id = boxer.annotate_activity(activity_id, notes);
     if id != 0 {
         Some(id.to_string()) // Responder<i64> not implemented
@@ -74,6 +89,7 @@ fn rocket() -> _ {
         .attach(cors)
         .mount("/", routes![get_action_name])
         .mount("/", routes![get_actions])
+        .mount("/", routes![get_activities])
         .mount("/", routes![log_activity])
         .mount("/", routes![notate_activity])
 }
