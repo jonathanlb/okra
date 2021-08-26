@@ -931,6 +931,7 @@ dependencies = [
 [[package]]
 name = "normal"
 version = "0.1.0"
+source = "git+https://github.com/jonathanlb/normal#605b13c799a2ee8836d0a4f3c74685beccb8d960"
 dependencies = [
  "regex",
  "sqlite",
