@@ -2,12 +2,13 @@
 
 #[macro_use]
 extern crate rocket;
-#[macro_use]
 extern crate rocket_contrib;
 
 use okra::boxchecker::{ActionId, ActivityId, BoxChecker, BoxSearcher};
 use okra::sqlite_boxchecker::SqliteBoxes;
-use rocket::http::Method;
+use rocket::http::{Cookie, CookieJar, Method};
+use rocket::serde::json::Json;
+use rocket::serde::{Deserialize, Serialize};
 use rocket_cors::{AllowedHeaders, AllowedOrigins, CorsOptions};
 use std::convert::TryInto;
 
@@ -17,14 +18,14 @@ fn get_boxer(file_name: &str) -> SqliteBoxes {
 }
 
 #[get("/action/get/<max_results>/<last_id>")]
-fn get_actions(max_results: usize, last_id: usize) -> String {
+fn get_actions(max_results: usize, last_id: usize) -> Option<Json<Vec<(ActionId, String)>>> {
     // XXX limit or ossify/remove max_results
     // TODO: add DB and user configuration
     let boxer = get_boxer("test.db");
     let mut dest = vec![(0, "".to_string()); max_results];
     let num_results = boxer.search_action_names("%", last_id.try_into().unwrap(), &mut dest);
     dest.truncate(num_results);
-    json!(dest).to_string()
+    Some(Json(dest))
 }
 
 #[get("/action/get_name/<action_id>")]
@@ -39,12 +40,16 @@ fn get_action_name(action_id: ActionId) -> Option<String> {
 }
 
 #[get("/activity/get/<start>/<end>/<max_results>")]
-fn get_activities(start: usize, end: usize, max_results: usize) -> Option<String> {
+fn get_activities(
+    start: usize,
+    end: usize,
+    max_results: usize,
+) -> Option<Json<Vec<(ActivityId, ActionId)>>> {
     let boxer = get_boxer("test.db");
     let mut dest = vec![(0, 0); max_results];
     let num_results = boxer.search_activity_by_time(start, end, &mut dest);
     dest.truncate(num_results);
-    Some(json!(dest).to_string())
+    Some(Json(dest))
 }
 
 #[get("/activity/log/<action_id>")]
@@ -56,6 +61,19 @@ fn log_activity(action_id: ActionId) -> Option<String> {
     } else {
         None
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct LoginInfo {
+    username: String,
+    password: String,
+}
+
+#[post("/users/login", format = "application/json", data = "<login_info>")]
+fn login(login_info: Json<LoginInfo>, cookies: &CookieJar<'_>) -> Option<String> {
+    let cookie = Cookie::new("auth", "secret");
+    cookies.add_private(cookie);
+    Some(format!("hello {}", login_info.username))
 }
 
 #[get("/activity/notate/<activity_id>/<notes>")]
@@ -91,5 +109,6 @@ fn rocket() -> _ {
         .mount("/", routes![get_actions])
         .mount("/", routes![get_activities])
         .mount("/", routes![log_activity])
+        .mount("/", routes![login])
         .mount("/", routes![notate_activity])
 }
