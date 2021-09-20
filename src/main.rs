@@ -4,11 +4,11 @@
 extern crate rocket;
 extern crate rocket_contrib;
 
+use okra::auth::login;
 use okra::boxchecker::{ActionId, ActivityId, BoxChecker, BoxSearcher};
 use okra::sqlite_boxchecker::SqliteBoxes;
-use rocket::http::{Cookie, CookieJar, Method};
+use rocket::http::Method;
 use rocket::serde::json::Json;
-use rocket::serde::{Deserialize, Serialize};
 use rocket_cors::{AllowedHeaders, AllowedOrigins, CorsOptions};
 use std::convert::TryInto;
 
@@ -61,19 +61,6 @@ fn log_activity(action_id: ActionId) -> Option<String> {
     } else {
         None
     }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct LoginInfo {
-    username: String,
-    password: String,
-}
-
-#[post("/users/login", format = "application/json", data = "<login_info>")]
-fn login(login_info: Json<LoginInfo>, cookies: &CookieJar<'_>) -> Option<String> {
-    let cookie = Cookie::new("auth", "secret");
-    cookies.add_private(cookie);
-    Some(format!("hello {}", login_info.username))
 }
 
 #[get("/activity/notate/<activity_id>/<notes>")]

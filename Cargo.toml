@@ -16,8 +16,9 @@ path = "src/util/link_action.rs"
 [dependencies]
 env_logger = "0.9.0"
 log = "0.4.14"
-normal = { git = "https://github.com/jonathanlb/normal" }
-# normal = { path = "../normal" }
+jsonwebtoken = "7.2.0"
+# normal = { git = "https://github.com/jonathanlb/normal" }
+normal = { path = "../normal" }
 rocket = { version = "0.5.0-rc.1", features = ["secrets", "tls", "json"] }
 rocket_contrib = "0.4.10"
 rocket_cors = { git = "https://github.com/lawliet89/rocket_cors", branch = "master" }
@@ -25,4 +26,5 @@ rocket_cors = { git = "https://github.com/lawliet89/rocket_cors", branch = "mast
 rust-crypto = "^0.2"
 serde = "1.0.130"
 serde_json = "1.0.67"
+sqlite = "0.25.3" 
 structopt = "0.3.17"
