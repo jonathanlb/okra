@@ -1,18 +1,20 @@
-use rocket::{post};
 use rocket::http::{Cookie, CookieJar};
-use rocket::serde::{Deserialize, Serialize};
+use rocket::post;
 use rocket::serde::json::Json;
+use rocket::serde::{Deserialize, Serialize};
 use sqlite::{Connection, State};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-
-static USERS_TABLE_NAME: &str = "users";
+static USERS_DB_NAME: &str = "users.sqlite";
 static USERS_COL_NAME: &str = "username";
+static USERS_TABLE_NAME: &str = "users";
 static SECRET_COL_NAME: &str = "secret";
+static SESSION_DURATION: Duration = Duration::new(7 * 24 * 60 * 69, 0);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LoginInfo<'a> {
-    username: &'a str,
-    password: &'a str,
+    pub username: &'a str,
+    pub password: &'a str,
 }
 
 #[derive(Debug)]
@@ -26,13 +28,13 @@ macro_rules! unwrap_msg {
     };
 }
 
-trait Auth {
+pub trait Auth {
     fn add_user(&mut self, login: &LoginInfo) -> Result<bool, AuthError>;
     fn auth_cookie(&self, cookie: &str) -> Result<String, AuthError>;
     fn auth_user(&self, login: &LoginInfo) -> Result<String, AuthError>;
 }
 
-struct SqliteAuth {
+pub struct SqliteAuth {
     conn: Connection,
 }
 
@@ -44,13 +46,10 @@ impl SqliteAuth {
                 CREATE TABLE IF NOT EXISTS {} ({} TEXT UNIQUE, {} TEXT);
                 CREATE INDEX IF NOT EXISTS idx_username ON {} ({});
             ",
-            USERS_TABLE_NAME,
-            USERS_COL_NAME,
-            SECRET_COL_NAME,
-            USERS_TABLE_NAME,
-            USERS_COL_NAME
-            );
-        {   // explicit lifetime to avoid conn.drop();
+            USERS_TABLE_NAME, USERS_COL_NAME, SECRET_COL_NAME, USERS_TABLE_NAME, USERS_COL_NAME
+        );
+        {
+            // explicit lifetime to avoid conn.drop();
             let mut stat = conn.prepare(query)?;
             stat.next()?;
         }
@@ -58,11 +57,45 @@ impl SqliteAuth {
     }
 }
 
+/// Check that the plaintext/extracted authorization cookie is valid and
+/// has not yet expired.
+/// The format of the token is the epoch milliseconds followed by the (unchecked)
+/// username.
+fn auth_cookie(cookie: &str) -> Result<String, AuthError> {
+    let tokens: Vec<&str> = cookie.split(' ').collect();
+    if tokens.len() < 2 {
+        return Err(AuthError {
+            msg: format!("invalid auth cookie: '{}'", cookie),
+        });
+    }
+
+    match tokens[0].parse::<u128>() {
+        Ok(expiry) => {
+            let epochs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            if epochs < expiry {
+                Ok("OK".to_string())
+            } else {
+                Err(AuthError {
+                    msg: format!("expired auth cookie: '{}'", cookie),
+                })
+            }
+        }
+        Err(_) => Err(AuthError {
+            msg: format!("invalid auth cookie: '{}'", cookie),
+        }),
+    }
+}
+
 impl Auth for SqliteAuth {
+    /// Insert a new user into the users database.
     fn add_user(&mut self, login: &LoginInfo) -> Result<bool, AuthError> {
         let query = format!(
             "INSERT INTO {} ({}, {}) VALUES(?, ?);",
-            USERS_TABLE_NAME, USERS_COL_NAME, SECRET_COL_NAME);
+            USERS_TABLE_NAME, USERS_COL_NAME, SECRET_COL_NAME
+        );
         let mut stat = self.conn.prepare(query).unwrap();
         stat.bind(1, login.username).unwrap();
         stat.bind(2, login.password).unwrap(); // XXX hash TODO
@@ -74,16 +107,21 @@ impl Auth for SqliteAuth {
         }
     }
 
+    /// Check that the plaintext/extracted authorization cookie is valid and
+    /// has not yet expired.
+    /// The format of the token is the epoch milliseconds followed by the (unchecked)
+    /// username.
     fn auth_cookie(&self, cookie: &str) -> Result<String, AuthError> {
-        Err(AuthError{
-            msg: "unimplemented".to_string()
-        })
+        auth_cookie(cookie)
     }
 
+    /// Query the database for username and password match, returning a
+    /// plaintext authorization cookie to be privately recorded.
     fn auth_user(&self, login: &LoginInfo) -> Result<String, AuthError> {
         let query = format!(
             "SELECT {} FROM {} WHERE {} = ?",
-            SECRET_COL_NAME, USERS_TABLE_NAME, USERS_COL_NAME);
+            SECRET_COL_NAME, USERS_TABLE_NAME, USERS_COL_NAME
+        );
         let mut stat = self.conn.prepare(query).unwrap();
         stat.bind(1, login.username).unwrap();
         match stat.next() {
@@ -91,30 +129,54 @@ impl Auth for SqliteAuth {
                 let stored_secret = stat.read::<String>(0).unwrap();
                 // XXX hash TODO
                 if login.password.eq(&stored_secret) {
-                    Ok("OK".to_string())
+                    Ok(get_auth_str(login))
                 } else {
-                    Err(AuthError{
+                    Err(AuthError {
                         msg: "invalid password".to_string(),
                     })
                 }
-            },
-            Ok(State::Done) => Err(AuthError{
+            }
+            Ok(State::Done) => Err(AuthError {
                 msg: format!("no user: {}", login.username),
             }),
             Err(e) => Err(AuthError {
-                msg: format!("failed to lookup user {}: {}", login.username, unwrap_msg!(e)),
+                msg: format!(
+                    "failed to lookup user {}: {}",
+                    login.username,
+                    unwrap_msg!(e)
+                ),
             }),
         }
-
-        
     }
+}
+
+/// Construct an authorization string valid for the default duration.
+fn get_auth_str(login: &LoginInfo) -> String {
+    let expiry = SystemTime::now()
+        .checked_add(SESSION_DURATION)
+        .unwrap()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    format!("{} {}", expiry, login.username)
+}
+
+fn get_auth() -> SqliteAuth {
+    SqliteAuth::new(USERS_DB_NAME).unwrap()
 }
 
 #[post("/users/login", format = "application/json", data = "<login_info>")]
 pub fn login(login_info: Json<LoginInfo>, cookies: &CookieJar<'_>) -> Option<String> {
-    let cookie = Cookie::new("auth", "secret");
-    cookies.add_private(cookie);
-    Some(format!("hello {}", login_info.username))
+    match get_auth().auth_user(&login_info) {
+        Ok(token) => {
+            let cookie = Cookie::build("auth", token).finish();
+            cookies.add_private(cookie);
+            Some(format!("hello {}", login_info.username))
+        }
+        Err(_) => {
+            None // XXX TODO redirect
+        }
+    }
 }
 
 #[cfg(test)]

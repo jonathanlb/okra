@@ -55,6 +55,18 @@ fn denies_bad_cookie() {
 }
 
 #[test]
+fn denies_expired_cookie() {
+    let mut auth = SqliteAuth::new(":memory:").unwrap();
+    let login = LoginInfo {
+        username: "bob",
+        password: "secret",
+    };
+    auth.add_user(&login).unwrap();
+    let cookie = format!("{} {}", 0, login.username);
+    assert!(auth.auth_cookie(&cookie).is_err());
+}
+
+#[test]
 fn rejects_adding_duplicate_user() {
     let mut auth = SqliteAuth::new(":memory:").unwrap();
     let login = LoginInfo {
