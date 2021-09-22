@@ -1,10 +1,13 @@
-use rocket::http::{Cookie, CookieJar};
-use rocket::post;
+use rocket::http::{Cookie, CookieJar, Status};
+use rocket::outcome::Outcome;
+use rocket::request::{FromRequest, Request};
 use rocket::serde::json::Json;
 use rocket::serde::{Deserialize, Serialize};
+use rocket::{post, request};
 use sqlite::{Connection, State};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+static AUTH_COOKIE: &str = "auth";
 static USERS_DB_NAME: &str = "users.sqlite";
 static USERS_COL_NAME: &str = "username";
 static USERS_TABLE_NAME: &str = "users";
@@ -161,6 +164,25 @@ fn get_auth_str(login: &LoginInfo) -> String {
     format!("{} {}", expiry, login.username)
 }
 
+pub struct AuthKey<'r>(&'r str);
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for AuthKey<'r> {
+    type Error = AuthError;
+
+    async fn from_request(request: &'r Request<'_>) -> request::Outcome<Self, Self::Error> {
+        match request.cookies().get_private(AUTH_COOKIE) {
+            Some(cookie) => Outcome::Success(AuthKey("JoNathan")),
+            None => Outcome::Failure((
+                Status::Unauthorized,
+                AuthError {
+                    msg: "Unauthorized".to_string(),
+                },
+            )),
+        }
+    }
+}
+
 fn get_auth() -> SqliteAuth {
     SqliteAuth::new(USERS_DB_NAME).unwrap()
 }
@@ -169,7 +191,7 @@ fn get_auth() -> SqliteAuth {
 pub fn login(login_info: Json<LoginInfo>, cookies: &CookieJar<'_>) -> Option<String> {
     match get_auth().auth_user(&login_info) {
         Ok(token) => {
-            let cookie = Cookie::build("auth", token).finish();
+            let cookie = Cookie::build(AUTH_COOKIE, token).finish();
             cookies.add_private(cookie);
             Some(format!("hello {}", login_info.username))
         }
@@ -177,6 +199,12 @@ pub fn login(login_info: Json<LoginInfo>, cookies: &CookieJar<'_>) -> Option<Str
             None // XXX TODO redirect
         }
     }
+}
+
+#[post("/users/logout")]
+pub fn logout(cookies: &CookieJar<'_>) -> Option<String> {
+    cookies.remove_private(Cookie::named(AUTH_COOKIE));
+    Some("OK".to_string())
 }
 
 #[cfg(test)]

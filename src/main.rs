@@ -4,7 +4,7 @@
 extern crate rocket;
 extern crate rocket_contrib;
 
-use okra::auth::login;
+use okra::auth::{login, logout, AuthKey};
 use okra::boxchecker::{ActionId, ActivityId, BoxChecker, BoxSearcher};
 use okra::sqlite_boxchecker::SqliteBoxes;
 use rocket::http::Method;
@@ -18,9 +18,13 @@ fn get_boxer(file_name: &str) -> SqliteBoxes {
 }
 
 #[get("/action/get/<max_results>/<last_id>")]
-fn get_actions(max_results: usize, last_id: usize) -> Option<Json<Vec<(ActionId, String)>>> {
+fn get_actions(
+    max_results: usize,
+    last_id: usize,
+    auth: AuthKey,
+) -> Option<Json<Vec<(ActionId, String)>>> {
     // XXX limit or ossify/remove max_results
-    // TODO: add DB and user configuration
+    // TODO: add DB and user configuration -- consider getting config info from auth?
     let boxer = get_boxer("test.db");
     let mut dest = vec![(0, "".to_string()); max_results];
     let num_results = boxer.search_action_names("%", last_id.try_into().unwrap(), &mut dest);
@@ -29,7 +33,7 @@ fn get_actions(max_results: usize, last_id: usize) -> Option<Json<Vec<(ActionId,
 }
 
 #[get("/action/get_name/<action_id>")]
-fn get_action_name(action_id: ActionId) -> Option<String> {
+fn get_action_name(action_id: ActionId, auth: AuthKey) -> Option<String> {
     let boxer = get_boxer("test.db");
     let name = boxer.get_action_name(action_id);
     if name == "" {
@@ -44,6 +48,7 @@ fn get_activities(
     start: usize,
     end: usize,
     max_results: usize,
+    auth: AuthKey,
 ) -> Option<Json<Vec<(ActivityId, ActionId)>>> {
     let boxer = get_boxer("test.db");
     let mut dest = vec![(0, 0); max_results];
@@ -53,7 +58,7 @@ fn get_activities(
 }
 
 #[get("/activity/log/<action_id>")]
-fn log_activity(action_id: ActionId) -> Option<String> {
+fn log_activity(action_id: ActionId, auth: AuthKey) -> Option<String> {
     let mut boxer = get_boxer("test.db");
     let id = boxer.log_activity(action_id);
     if id != 0 {
@@ -64,7 +69,7 @@ fn log_activity(action_id: ActionId) -> Option<String> {
 }
 
 #[get("/activity/notate/<activity_id>/<notes>")]
-fn notate_activity(activity_id: ActivityId, notes: &str) -> Option<String> {
+fn notate_activity(activity_id: ActivityId, notes: &str, auth: AuthKey) -> Option<String> {
     let mut boxer = get_boxer("test.db");
     let id = boxer.annotate_activity(activity_id, notes);
     if id != 0 {
@@ -97,5 +102,6 @@ fn rocket() -> _ {
         .mount("/", routes![get_activities])
         .mount("/", routes![log_activity])
         .mount("/", routes![login])
+        .mount("/", routes![logout])
         .mount("/", routes![notate_activity])
 }
