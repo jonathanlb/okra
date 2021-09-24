@@ -8,7 +8,7 @@ use sqlite::{Connection, State};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 static AUTH_COOKIE: &str = "auth";
-static USERS_DB_NAME: &str = "users.sqlite";
+static USERS_DB_NAME: &str = "data/users.sqlite";
 static USERS_COL_NAME: &str = "username";
 static USERS_TABLE_NAME: &str = "users";
 static SECRET_COL_NAME: &str = "secret";
@@ -164,15 +164,45 @@ fn get_auth_str(login: &LoginInfo) -> String {
     format!("{} {}", expiry, login.username)
 }
 
-pub struct AuthKey<'r>(&'r str);
+#[derive(Debug)]
+pub struct AuthKey(pub String);
 
 #[rocket::async_trait]
-impl<'r> FromRequest<'r> for AuthKey<'r> {
+impl<'r> FromRequest<'r> for AuthKey {
     type Error = AuthError;
 
     async fn from_request(request: &'r Request<'_>) -> request::Outcome<Self, Self::Error> {
         match request.cookies().get_private(AUTH_COOKIE) {
-            Some(cookie) => Outcome::Success(AuthKey("JoNathan")),
+            Some(cookie) => {
+                println!("cookie {}", cookie.value());
+                let tokens: Vec<&str> = cookie.value().split(' ').collect();
+                let username = tokens[1];
+                let expiry_str = tokens[0];
+                match expiry_str.parse::<u128>() {
+                    Ok(expiry) => {
+                        let epochs = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis();
+                        if epochs < expiry {
+                            Outcome::Success(AuthKey(username.to_string()))
+                        } else {
+                            Outcome::Failure((
+                                Status::NotExtended,
+                                AuthError {
+                                    msg: "Expired".to_string(),
+                                },
+                            ))
+                        }
+                    }
+                    Err(_) => Outcome::Failure((
+                        Status::BadRequest,
+                        AuthError {
+                            msg: "InvalidAuth".to_string(),
+                        },
+                    )),
+                }
+            }
             None => Outcome::Failure((
                 Status::Unauthorized,
                 AuthError {

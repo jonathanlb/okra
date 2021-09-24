@@ -12,9 +12,10 @@ use rocket::serde::json::Json;
 use rocket_cors::{AllowedHeaders, AllowedOrigins, CorsOptions};
 use std::convert::TryInto;
 
-// TODO get db name for particular user
-fn get_boxer(file_name: &str) -> SqliteBoxes {
-    SqliteBoxes::new(file_name)
+static USER_BOX_PREFIX: &str = "data/user_";
+
+fn get_boxer<'a>(auth: &'a AuthKey) -> SqliteBoxes<'a> {
+    SqliteBoxes::new(format!("{}{}.sqlite", USER_BOX_PREFIX, auth.0).as_str())
 }
 
 #[get("/action/get/<max_results>/<last_id>")]
@@ -24,8 +25,7 @@ fn get_actions(
     auth: AuthKey,
 ) -> Option<Json<Vec<(ActionId, String)>>> {
     // XXX limit or ossify/remove max_results
-    // TODO: add DB and user configuration -- consider getting config info from auth?
-    let boxer = get_boxer("test.db");
+    let boxer = get_boxer(&auth);
     let mut dest = vec![(0, "".to_string()); max_results];
     let num_results = boxer.search_action_names("%", last_id.try_into().unwrap(), &mut dest);
     dest.truncate(num_results);
@@ -34,7 +34,7 @@ fn get_actions(
 
 #[get("/action/get_name/<action_id>")]
 fn get_action_name(action_id: ActionId, auth: AuthKey) -> Option<String> {
-    let boxer = get_boxer("test.db");
+    let boxer = get_boxer(&auth);
     let name = boxer.get_action_name(action_id);
     if name == "" {
         None
@@ -50,7 +50,7 @@ fn get_activities(
     max_results: usize,
     auth: AuthKey,
 ) -> Option<Json<Vec<(ActivityId, ActionId)>>> {
-    let boxer = get_boxer("test.db");
+    let boxer = get_boxer(&auth);
     let mut dest = vec![(0, 0); max_results];
     let num_results = boxer.search_activity_by_time(start, end, &mut dest);
     dest.truncate(num_results);
@@ -59,7 +59,7 @@ fn get_activities(
 
 #[get("/activity/log/<action_id>")]
 fn log_activity(action_id: ActionId, auth: AuthKey) -> Option<String> {
-    let mut boxer = get_boxer("test.db");
+    let mut boxer = get_boxer(&auth);
     let id = boxer.log_activity(action_id);
     if id != 0 {
         Some(id.to_string()) // Responder<i64> not implemented
@@ -70,7 +70,7 @@ fn log_activity(action_id: ActionId, auth: AuthKey) -> Option<String> {
 
 #[get("/activity/notate/<activity_id>/<notes>")]
 fn notate_activity(activity_id: ActivityId, notes: &str, auth: AuthKey) -> Option<String> {
-    let mut boxer = get_boxer("test.db");
+    let mut boxer = get_boxer(&auth);
     let id = boxer.annotate_activity(activity_id, notes);
     if id != 0 {
         Some(id.to_string()) // Responder<i64> not implemented
