@@ -1,9 +1,10 @@
+use bcrypt::{hash, verify, DEFAULT_COST};
 use rocket::http::{Cookie, CookieJar, Status};
 use rocket::outcome::Outcome;
 use rocket::request::{FromRequest, Request};
 use rocket::serde::json::Json;
-use rocket::serde::{Deserialize, Serialize};
-use rocket::{post, request};
+use rocket::serde::Deserialize;
+use rocket::{get, post, request};
 use sqlite::{Connection, State};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -14,7 +15,7 @@ static USERS_TABLE_NAME: &str = "users";
 static SECRET_COL_NAME: &str = "secret";
 static SESSION_DURATION: Duration = Duration::new(7 * 24 * 60 * 69, 0);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct LoginInfo<'a> {
     pub username: &'a str,
     pub password: &'a str,
@@ -101,7 +102,9 @@ impl Auth for SqliteAuth {
         );
         let mut stat = self.conn.prepare(query).unwrap();
         stat.bind(1, login.username).unwrap();
-        stat.bind(2, login.password).unwrap(); // XXX hash TODO
+
+        let hashed = hash(login.password, DEFAULT_COST).unwrap();
+        stat.bind(2, hashed.as_str()).unwrap();
         match stat.next() {
             Ok(_) => Ok(true),
             Err(e) => Err(AuthError {
@@ -120,6 +123,7 @@ impl Auth for SqliteAuth {
 
     /// Query the database for username and password match, returning a
     /// plaintext authorization cookie to be privately recorded.
+    /// TODO: edit configuration to return non 404 error response.
     fn auth_user(&self, login: &LoginInfo) -> Result<String, AuthError> {
         let query = format!(
             "SELECT {} FROM {} WHERE {} = ?",
@@ -130,13 +134,28 @@ impl Auth for SqliteAuth {
         match stat.next() {
             Ok(State::Row) => {
                 let stored_secret = stat.read::<String>(0).unwrap();
-                // XXX hash TODO
-                if login.password.eq(&stored_secret) {
-                    Ok(get_auth_str(login))
-                } else {
-                    Err(AuthError {
-                        msg: "invalid password".to_string(),
-                    })
+
+                log::debug!(
+                    "checking {} {} {}",
+                    login.username,
+                    login.password,
+                    stored_secret
+                );
+                match verify(login.password, &stored_secret) {
+                    Ok(verified) => {
+                        if verified {
+                            Ok(get_auth_str(login))
+                        } else {
+                            log::error!("invalid user/pass {} {}", login.username, login.password);
+                            Err(AuthError {
+                                msg: "invalid password".to_string(),
+                            })
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("bcrypt error: {}", e);
+                        Err(AuthError { msg: e.to_string() })
+                    }
                 }
             }
             Ok(State::Done) => Err(AuthError {
@@ -174,7 +193,7 @@ impl<'r> FromRequest<'r> for AuthKey {
     async fn from_request(request: &'r Request<'_>) -> request::Outcome<Self, Self::Error> {
         match request.cookies().get_private(AUTH_COOKIE) {
             Some(cookie) => {
-                println!("cookie {}", cookie.value());
+                log::debug!("cookie {}", cookie.value());
                 let tokens: Vec<&str> = cookie.value().split(' ').collect();
                 let username = tokens[1];
                 let expiry_str = tokens[0];
@@ -231,7 +250,7 @@ pub fn login(login_info: Json<LoginInfo>, cookies: &CookieJar<'_>) -> Option<Str
     }
 }
 
-#[post("/users/logout")]
+#[get("/users/logout")]
 pub fn logout(cookies: &CookieJar<'_>) -> Option<String> {
     cookies.remove_private(Cookie::named(AUTH_COOKIE));
     Some("OK".to_string())
